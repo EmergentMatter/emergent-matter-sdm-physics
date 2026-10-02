@@ -1,0 +1,144 @@
+[project]
+name = "emergent-matter-sdm-physics"
+version = "0.0.0"
+description = "Software Defined Matter physics layer: the sdm-traj trajectory contract plus Beam Constraint Model flexure solvers behind an optional jax extra"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Emergent Matter" }]
+keywords = [
+    "physics",
+    "flexure",
+    "trajectory",
+    "beam-constraint-model",
+    "jax",
+    "software-defined-matter",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/EmergentMatter/emergent-matter-sdm-physics"
+Repository = "https://github.com/EmergentMatter/emergent-matter-sdm-physics"
+Issues = "https://github.com/EmergentMatter/emergent-matter-sdm-physics/issues"
+Changelog = "https://github.com/EmergentMatter/emergent-matter-sdm-physics/blob/main/CHANGELOG.md"
+
+# Solver backends carry their own deps and stay OPTIONAL: the trajectory
+# format, the reader and the writer are stdlib-only by design (sdm-view loads
+# them inside Blender's Python), and adding jax to the base install would put
+# a 300 MB wheel behind a JSONL parser. `uv sync --extra solvers` gets BCM.
+[project.optional-dependencies]
+solvers = ["jax>=0.4", "jaxlib>=0.4"]
+
+[dependency-groups]
+# Installed by a plain `uv sync`, unlike [project.optional-dependencies],
+# which needs --extra. CI runs `uv sync --locked`, so everything the lint,
+# format, and typecheck jobs invoke has to be declared here.
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.16",
+    "mypy>=1.14",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sdm_physics"]
+
+[tool.hatch.build]
+# An allowlist, so the sdist carries the package sources and the data files the
+# wheel ships, and nothing else: no tests, CI config, agent guidance or lock file
+# goes onto the public index.
+include = [
+    "src/sdm_physics/**/*.py",
+    "src/sdm_physics/py.typed",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]   # per-repo ignores are explicit entries
+
+# ── towncrier: turns changelog.d/ notes into CHANGELOG.md ─────────────────
+#
+# Exactly three fragment types, matching the three bump levels the release
+# workflow understands (see EmergentMatter/actions CONTRACT.md). Do not add
+# a fourth type: compute_bump.py only recognizes major/minor/patch and
+# exits 1 on anything else.
+[tool.towncrier]
+directory = "changelog.d"          # where `uv run scripts/changeset.py` writes notes
+filename = "CHANGELOG.md"
+# Insert this marker into CHANGELOG.md once, above your existing history.
+# towncrier writes new release sections directly below it and never touches
+# anything beneath: see docs/onboarding.md for inserting it into a
+# hand-written changelog without disturbing prior entries.
+start_string = "<!-- towncrier release notes start -->\n"
+title_format = "## {version} ({project_date})"
+underlines = ["-", "~", "^"]
+
+[[tool.towncrier.type]]
+directory = "major"
+name = "Major"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "minor"
+name = "Minor"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "patch"
+name = "Patch"
+showcontent = true
+
+# ── em-release: tells sync_version.py every place the version string lives ──
+#
+# One entry per "path:symbol" location, beyond `[project] version` itself
+# (that one is handled separately, by `uv version --bump` in the release
+# workflow; do not list it here).
+#
+# Every location you list gets written on every release. Anything you don't
+# list is never touched: that's deliberate, so a data/schema version that
+# is meant to move independently of the package version is safe just by
+# being left off this list. See docs/onboarding.md for the
+# emergent-matter-sdm-materials worked example, where __catalog_version__ *is*
+# listed because it's meant to track the package version in lockstep.
+[tool.em-release]
+templates_version = "v1.15.0"
+tier = "open"
+version_files = [
+  "src/sdm_physics/__init__.py:__version__",
+]
+
+# ── mypy ────────────────────────────────────────────────────────────────
+[tool.mypy]
+# Checked against the 3.11 floor, matching requires-python and the CI test
+# matrix, so syntax that only exists on newer Pythons fails here first.
+python_version = "3.11"
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# jax ships no usable stubs, and installing it just to typecheck would put
+# the heavyweight solvers extra in every dev environment. Treat it as
+# untyped: jnp values become Any inside the solver modules, which stay
+# fully annotated at their own boundaries rather than relaxed wholesale.
+[[tool.mypy.overrides]]
+module = ["jax.*"]
+ignore_missing_imports = true

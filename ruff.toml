@@ -1,0 +1,14 @@
+# Local rule additions and overrides go here, never in ruff-base.toml.
+
+extend = "ruff-base.toml"
+
+# This repo declares requires-python = ">=3.11" (stdlib-only base install),
+# proven by the CI test matrix, so ruff targets the floor rather than py313.
+target-version = "py311"
+
+[lint.per-file-ignores]
+# The jax-dependent test modules gate every import on
+# pytest.importorskip("jax"), so their remaining imports sit below that
+# call by design; E402 would demand the impossible ordering.
+"tests/test_hexafoil_bcm.py" = ["E402"]
+"tests/test_hexafoil_sweep.py" = ["E402"]
