@@ -1,6 +1,6 @@
 [project]
 name = "emergent-matter-sdm-physics"
-version = "0.0.0"
+version = "1.0.0"
 description = "Software Defined Matter physics layer: the sdm-traj trajectory contract plus Beam Constraint Model flexure solvers behind an optional jax extra"
 readme = "README.md"
 requires-python = ">=3.11"
