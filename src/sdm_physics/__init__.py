@@ -20,7 +20,7 @@ from sdm_physics.trajectory import (
     write_trajectory,
 )
 
-__version__ = "0.0.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "TRAJ_EXTENSION",
