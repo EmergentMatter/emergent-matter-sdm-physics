@@ -295,3 +295,39 @@ def test_empty_stream_rejected(tmp_path):
     path.write_text("")
     with pytest.raises(ValueError, match="header"):
         read_trajectory(path)
+
+
+def test_assembly_poses_round_trip(tmp_path):
+    from sdm_physics.trajectory import Sample, TrajectoryHeader, read_trajectory, write_trajectory
+
+    header = TrajectoryHeader(
+        s_part="hand",
+        s_sdm="../hand.sdm",
+        s_loop="pingpong",
+        poses=("mechanism/crank_driven_thumb",),
+    )
+    samples = [
+        Sample(
+            d_t=0.0, poses={"mechanism/crank_driven_thumb": (0.0, 0.0, 10.0, 1.0, 0.0, 0.0, 0.0)}
+        ),
+        Sample(
+            d_t=1.0,
+            poses={
+                "mechanism/crank_driven_thumb": (0.0, 0.0, 10.0, 0.7071068, 0.7071068, 0.0, 0.0)
+            },
+        ),
+    ]
+    path = write_trajectory(tmp_path / "grip.traj.jsonl", header, samples)
+    back_header, back = read_trajectory(path)
+    assert back_header.s_loop == "pingpong"
+    assert back_header.poses == ("mechanism/crank_driven_thumb",)
+    assert back[1].poses["mechanism/crank_driven_thumb"] == pytest.approx(
+        (0.0, 0.0, 10.0, 0.707107, 0.707107, 0.0, 0.0)
+    )
+
+
+def test_malformed_pose_is_dropped():
+    from sdm_physics.trajectory import Sample
+
+    s = Sample.from_obj({"t": 0.0, "poses": {"a": [1, 2, 3], "b": [0, 0, 0, 1, 0, 0, 0]}})
+    assert set(s.poses) == {"b"}
