@@ -50,7 +50,7 @@ outputs use. There is exactly one player.
 | `name` | no | str | Display name for the consumer's UI row. Default: file stem. |
 | `sdm` | no | str | Path to the source `.sdm`, relative to this file. Forward slashes. |
 | `sdm_sha256` | no | str | sha256 of the `.sdm` the trajectory was produced against, an advisory staleness check. Consumers MAY warn on mismatch with the loaded part; they MUST NOT refuse to play. |
-| `loop` | no | str | `"once"` (default: hold last sample) or `"cycle"` (wrap; see §5). Producers writing `"cycle"` SHOULD make first and last sample values equal for a seamless wrap. |
+| `loop` | no | str | `"once"` (default: hold last sample), `"cycle"` (wrap; see §5) or `"pingpong"` (play forward, then back). Producers writing `"cycle"` SHOULD make first and last sample values equal for a seamless wrap. |
 | `rate_hz` | no | float | Nominal sample rate: a pacing/UI-allocation hint only. Per-sample `t` is always authoritative. |
 | `duration_s` | no | float | Expected duration hint (may be absent for open-ended live solves). Never authoritative; the cycle period is derived from the samples (§5). |
 | `source` | no | obj | Provenance, free-form and informational. Conventional keys: `kind` (`"physics"` \| `"authored"`), `producer` (str), `animation` (str, authored animation name), `created_at` (ISO 8601 UTC). |
@@ -123,7 +123,9 @@ configuration; `loop:"cycle"` wraps (§5).
 2. **Hold:** last value per channel, last field ref per kind. Before a channel's first
    sample it sits at `neutral`. After the last sample (`loop:"once"`), hold the last
    values. A new header resets all hold state.
-3. **Loop:** `loop:"cycle"` wraps playback time modulo the period
+3. **Loop:** `loop:"pingpong"` plays the samples forward and then backward, period
+   `2·(t_last − t_first)`: a motion between two end states (a gripper opening and
+   closing) is written once. `loop:"cycle"` wraps playback time modulo the period
    `(t_last − t_first)`, the trajectory equivalent of a CYCLES f-curve modifier.
    `duration_s` is never the authoritative period.
 4. **Stop / Rest Pose:** restore every bound channel to its `neutral`; drop any held
@@ -139,6 +141,36 @@ configuration; `loop:"cycle"` wraps (§5).
    "playing" state that the viewer's refine and re-bake suppression gates on (the
    consumer is `emergent-matter-sdm-view`, whose viewport and grid-path modules check
    an is-animation-playing flag), or the refine ladder misbehaves.
+
+## 5a. Assembly motion: poses
+
+A stream may move the instances of an assembly instead of (or as well as) driving
+channels: a mechanism whose parts move rigidly, precomputed by the CEM that knows its
+kinematics (a crank angle swept through its range, every link placed at each step).
+`part` names the assembly, `sdm` points at its `.sdm`, `channels` may be empty.
+
+Header key, optional:
+
+| Key | Type | Semantics |
+|---|---|---|
+| `poses` | list of str | The instance paths the samples move, so a player can list them before reading samples. Informational; a sample's `poses` keys are authoritative. |
+
+Sample key:
+
+| Key | Type | Semantics |
+|---|---|---|
+| `poses` | obj | `{instance_path: [x, y, z, qw, qx, qy, qz]}`. `instance_path` is instance ids from this assembly down, joined by `/` (`"mechanism/crank_driven_thumb"`). The value is that instance's transform relative to its parent assembly, in the same convention as the instance's `transform` in the `.sdm`: position in mm, then a unit quaternion (w, x, y, z). **Sparse:** an instance holds its last pose; before its first appearance it sits where its `.sdm` puts it. |
+
+Playback, beyond §5: positions interpolate linearly; orientations by spherical linear
+interpolation (both are linear in their own space; producers wanting smoother motion
+emit denser samples, as for channels). Stop / Rest Pose puts every moved instance
+back where its `.sdm` puts it. Instances not named in any sample never move. A
+player that does not know `poses` ignores the key (§6) and shows the assembly still.
+
+Location: next to the assembly, in a folder named after it:
+`hand.sdm` → `hand.motions/grip.traj.jsonl`, with `"sdm": "../hand.sdm"`. A viewer
+offers every stream in that folder as a motion of that assembly. The CEM writes
+them when it writes the assembly, so `sdm_sha256` matches.
 
 ## 6. Versioning & forward compatibility
 
