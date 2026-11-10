@@ -90,6 +90,9 @@ class Sample:
     d_t: float  # seconds, strictly increasing within a stream
     q: dict[str, float] | None = None  # sparse: subset of declared channels
     fields: tuple[FieldRef, ...] = ()
+    poses: dict[str, tuple[float, ...]] | None = (
+        None  # assembly motion (spec §5a): path -> x y z qw qx qy qz
+    )
 
     def to_obj(self) -> dict[str, Any]:
         obj: dict[str, Any] = {"t": round(float(self.d_t), _N_FLOAT_DECIMALS)}
@@ -99,6 +102,11 @@ class Sample:
             }
         if self.fields:
             obj["fields"] = [ref.to_obj() for ref in self.fields]
+        if self.poses is not None:
+            obj["poses"] = {
+                s_path: [round(float(d_v), _N_FLOAT_DECIMALS) for d_v in pose]
+                for s_path, pose in self.poses.items()
+            }
         return obj
 
     @classmethod
@@ -118,7 +126,17 @@ class Sample:
                 for ref in fields_raw
                 if isinstance(ref, dict) and "path" in ref and "kind" in ref
             )
-        return cls(d_t=float(obj["t"]), q=q, fields=fields)
+        poses_raw = obj.get("poses")
+        poses = (
+            {
+                str(s_path): tuple(float(d_v) for d_v in pose)
+                for s_path, pose in poses_raw.items()
+                if isinstance(pose, list) and len(pose) == 7
+            }
+            if isinstance(poses_raw, dict)
+            else None
+        )
+        return cls(d_t=float(obj["t"]), q=q, fields=fields, poses=poses)
 
 
 @dataclass(frozen=True)
@@ -130,10 +148,11 @@ class TrajectoryHeader:
     s_name: str | None = None  # display name; consumer defaults to file stem
     s_sdm: str | None = None  # path to the source .sdm, relative, fwd slashes
     s_sdm_sha256: str | None = None  # advisory staleness check
-    s_loop: str = "once"  # "once" (hold last) | "cycle" (wrap)
+    s_loop: str = "once"  # "once" (hold last) | "cycle" (wrap) | "pingpong" (forward, back)
     d_rate_hz: float | None = None  # pacing hint only; per-sample t authoritative
     d_duration_s: float | None = None  # hint; never the authoritative period
     source: dict[str, Any] | None = None  # provenance, free-form
+    poses: tuple[str, ...] = ()  # assembly motion: instance paths moved (spec §5a)
 
     def to_obj(self) -> dict[str, Any]:
         obj: dict[str, Any] = {
@@ -156,6 +175,8 @@ class TrajectoryHeader:
             obj["duration_s"] = self.d_duration_s
         if self.source is not None:
             obj["source"] = self.source
+        if self.poses:
+            obj["poses"] = list(self.poses)
         return obj
 
     @classmethod
@@ -197,6 +218,7 @@ class TrajectoryHeader:
             d_rate_hz=float(rate_hz) if rate_hz is not None else None,
             d_duration_s=float(duration_s) if duration_s is not None else None,
             source=source if isinstance(source, dict) else None,
+            poses=tuple(str(p) for p in obj.get("poses") or () if isinstance(p, str)),
         )
 
 
