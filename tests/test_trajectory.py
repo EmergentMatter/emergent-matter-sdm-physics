@@ -480,3 +480,41 @@ def test_goldens_validate_against_schema_when_jsonschema_is_installed():
     jsonschema.Draft202012Validator.check_schema(schema)
     for line in _GOLDEN.read_text().splitlines():
         jsonschema.validate(json.loads(line), schema)
+
+
+def test_writer_rejects_samples_that_collide_after_rounding(tmp_path):
+    # Regression: 0, 2e-7 and 4e-7 all round to 0.0 on the wire. The writer
+    # used to write them, and read_trajectory then rejected its own output.
+    header = TrajectoryHeader(s_part="hand")
+    with pytest.raises(ValueError, match="does not follow"):
+        write_trajectory(tmp_path / "a.traj.jsonl", header, [Sample(d_t=0.0), Sample(d_t=2e-7)])
+
+
+def test_writer_rejects_decreasing_t(tmp_path):
+    header = TrajectoryHeader(s_part="hand")
+    with pytest.raises(ValueError, match="does not follow"):
+        write_trajectory(tmp_path / "b.traj.jsonl", header, [Sample(d_t=1.0), Sample(d_t=0.5)])
+
+
+def test_writer_rejects_non_finite_t(tmp_path):
+    header = TrajectoryHeader(s_part="hand")
+    with pytest.raises(ValueError, match="not finite"):
+        write_trajectory(tmp_path / "c.traj.jsonl", header, [Sample(d_t=math.nan)])
+
+
+def test_writer_t_order_restarts_after_reheader(tmp_path):
+    path = tmp_path / "d.traj.jsonl"
+    with TrajectoryWriter(path, TrajectoryHeader(s_part="hand")) as writer:
+        writer.write_sample(Sample(d_t=5.0))
+        writer.write_header(TrajectoryHeader(s_part="hand"))
+        writer.write_sample(Sample(d_t=0.0))
+    assert [s.d_t for s in iter_samples(path.read_text().splitlines())] == [5.0, 0.0]
+
+
+def test_writer_output_always_reads_back(tmp_path):
+    # Steps just above the rounding step survive; whatever the writer accepts,
+    # the reader accepts.
+    samples = [Sample(d_t=n * 1e-6) for n in range(50)]
+    path = write_trajectory(tmp_path / "e.traj.jsonl", TrajectoryHeader(s_part="hand"), samples)
+    _, back = read_trajectory(path)
+    assert len(back) == len(samples)
