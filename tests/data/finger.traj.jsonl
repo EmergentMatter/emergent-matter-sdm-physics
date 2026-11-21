@@ -1,0 +1,6 @@
+{"format":"sdm-traj","version":1,"part":"finger","name":"curl and spread","sdm":"finger.sdm","loop":"cycle","channels":[{"name":"finger__curl","kind":"pose","neutral":0.0,"unit":"rad"},{"name":"finger__spread","kind":"pose","neutral":0.1,"unit":"rad"},{"name":"finger__force","kind":"metric","neutral":0.0}]}
+{"t":10.0,"q":{"finger__curl":0.0},"fields":[{"path":"fields/finger_u_000.npy","kind":"displacement"}]}
+{"t":11.0,"q":{"finger__curl":1.0,"finger__force":3.0,"solver_residual":1e-09}}
+{"t":12.0,"q":{"finger__spread":0.5},"fields":[{"path":"fields/finger_u_002.npy","kind":"displacement"}]}
+{"t":13.0,"q":{"finger__curl":0.0,"finger__spread":0.1}}
+{"eos":true}
