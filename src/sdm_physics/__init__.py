@@ -1,8 +1,8 @@
 """emergent-matter-sdm-physics: the SDM physics layer.
 
-v1 scope: the sdm-traj trajectory contract (producer + reader). Solver
-backends (jax-fem, magnetostatics) are onboarded later; this package stays
-importable without jax.
+Scope: the sdm-traj trajectory contract (producer + reader), covering both
+per-part channel streams and assembly motion (per-instance poses, spec §5a),
+plus the optional BCM solvers. The package root stays importable without jax.
 """
 
 from sdm_physics.trajectory import (

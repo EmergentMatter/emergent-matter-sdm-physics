@@ -3,8 +3,9 @@
 **Format id:** `sdm-traj` · **Version:** `1` (integer) · **File extension:** `.traj.jsonl`
 
 The contract between a trajectory **producer** (the physics layer in
-`emergent-matter-sdm-physics`, or sdm-view's authored-animation compiler) and the
-**consumer** (sdm-view's trajectory playback path). One stream = one part's configuration
+`emergent-matter-sdm-physics`, or an authored-animation compiler) and the
+**consumers** (the platform engine and sdm-ui's player, RobCAD, and the Blender viewer
+`emergent-matter-sdm-view`). One stream = one part's configuration
 over time, optionally accompanied by deformation-field snapshots. Authored `.sdm`
 animations are compiled to this format and consumed by the identical playback path physics
 outputs use. There is exactly one player.
@@ -45,12 +46,12 @@ outputs use. There is exactly one player.
 |---|---|---|---|
 | `format` | yes | str | Always `"sdm-traj"`. |
 | `version` | yes | int | Breaking-change gate. Readers MUST reject unsupported versions: `ValueError("Unsupported sdm-traj version {found!r} (expected {expected!r})")`. A missing `version` is malformed: reject (do NOT default). |
-| `part` | yes | str | Part name as declared in the source `.sdm`. Consumer matches against the imported part's manifest. |
-| `channels` | yes | list | Declared configuration channels (§3). Sample `q` keys not declared here are **ignored** by consumers. |
+| `part` | yes | str | Part name as declared in the source `.sdm` (for an assembly-motion stream, the assembly's name, §5a). Consumer matches against the imported part's manifest. A header without `part` is malformed: readers raise `ValueError`. |
+| `channels` | no | list | Declared configuration channels (§3). Optional; absent means no channels (an assembly-motion stream that only carries `poses`). If present it MUST be a list. Sample `q` keys not declared here are **ignored** by consumers. |
 | `name` | no | str | Display name for the consumer's UI row. Default: file stem. |
 | `sdm` | no | str | Path to the source `.sdm`, relative to this file. Forward slashes. |
 | `sdm_sha256` | no | str | sha256 of the `.sdm` the trajectory was produced against, an advisory staleness check. Consumers MAY warn on mismatch with the loaded part; they MUST NOT refuse to play. |
-| `loop` | no | str | `"once"` (default: hold last sample) or `"cycle"` (wrap; see §5). Producers writing `"cycle"` SHOULD make first and last sample values equal for a seamless wrap. |
+| `loop` | no | str | `"once"` (default: hold last sample), `"cycle"` (wrap; see §5) or `"pingpong"` (play forward, then back). An unknown value is treated as `"once"`. Producers writing `"cycle"` SHOULD make first and last sample values equal for a seamless wrap. |
 | `rate_hz` | no | float | Nominal sample rate: a pacing/UI-allocation hint only. Per-sample `t` is always authoritative. |
 | `duration_s` | no | float | Expected duration hint (may be absent for open-ended live solves). Never authoritative; the cycle period is derived from the samples (§5). |
 | `source` | no | obj | Provenance, free-form and informational. Conventional keys: `kind` (`"physics"` \| `"authored"`), `producer` (str), `animation` (str, authored animation name), `created_at` (ISO 8601 UTC). |
@@ -83,7 +84,7 @@ check runs once, against the header, before a single sample is consumed.
 
 | Key | Required | Type | Semantics |
 |---|---|---|---|
-| `t` | yes | float | Time in **seconds**, strictly increasing within a stream. Need not start at 0 (solver warm starts, live tails); players treat the first sample's `t` as the playback origin. Compiled authored streams SHOULD start at `t = 0.0`. |
+| `t` | yes | float | Time in **seconds**, finite and strictly increasing within a stream (per header: a re-header restarts the order). Readers raise `ValueError` on a sample whose `t` does not exceed the previous one. Writers apply the same check to `t` as written, after rounding, so a writer never produces a stream its reader rejects. Need not start at 0 (solver warm starts, live tails); players treat the first sample's `t` as the playback origin. Compiled authored streams SHOULD start at `t = 0.0`. |
 | `q` | no | obj | `{channel_name: float}`: absolute values in the channel's unit. **Sparse:** a sample may carry any subset of declared channels; omitted channels **hold** their last value (or `neutral` before their first appearance). Keys not declared in `channels` are ignored (a free diagnostic channel for producers). |
 | `fields` | no | list | Field references (§4.1). Each **holds** until superseded by a later reference of the same `kind`. Field cadence is fully independent of sample cadence. |
 
@@ -112,7 +113,7 @@ For files, EOF is an implicit `eos`; a producer SHOULD still write it as the fin
 Over a v2 socket it is required: it is how a consumer distinguishes "solve finished"
 from "solver stalled". Producers MAY add informational keys (e.g. `"reason":
 "converged"`); readers ignore them. After `eos`: `loop:"once"` holds the last
-configuration; `loop:"cycle"` wraps (§5).
+configuration; `loop:"cycle"` wraps and `loop:"pingpong"` keeps bouncing (§5).
 
 ## 5. Playback semantics (normative for consumers)
 
@@ -120,12 +121,30 @@ configuration; `loop:"cycle"` wraps (§5).
    held-value timeline (after sparse-`q` hold is applied). There is deliberately no
    interpolation/easing schema: producers wanting smoother motion emit denser samples;
    easing lives in the producer, never in the format or the player.
+   The held-value timeline gives every channel a value at every sample, so a channel
+   interpolates between its held values at the two samples around `t`, not between
+   the samples that name it. A channel named at `t = 0` and `t = 2` but absent at
+   `t = 1` holds its `t = 0` value until `t = 1`, then ramps. A channel whose first
+   sample is at `t = 2` sits at `neutral` until the sample before it, then ramps from
+   `neutral`. Poses differ here and snap instead (§5a).
 2. **Hold:** last value per channel, last field ref per kind. Before a channel's first
    sample it sits at `neutral`. After the last sample (`loop:"once"`), hold the last
    values. A new header resets all hold state.
-3. **Loop:** `loop:"cycle"` wraps playback time modulo the period
+3. **Loop:** `loop:"pingpong"` plays the samples forward and then backward, period
+   `2·(t_last − t_first)`: a motion between two end states (a gripper opening and
+   closing) is written once. A stream with one sample, or with zero span, holds that
+   sample whatever `loop` says (the period would be 0). After `eos`, `pingpong` keeps
+   looping, like `cycle`. `loop:"cycle"` wraps playback time modulo the period
    `(t_last − t_first)`, the trajectory equivalent of a CYCLES f-curve modifier.
    `duration_s` is never the authoritative period.
+   With `e` the seconds since playback started and `span = t_last − t_first`, the
+   stream time evaluated is `t_first + min(e, span)` for `once`,
+   `t_first + (e mod span)` for `cycle`, and for `pingpong`
+   `t_first + u` where `u = e mod 2·span`, mirrored to `2·span − u` when it exceeds
+   `span`. The way back evaluates the same stream at the mirrored time, so holds and
+   snaps follow stream order, not playback order: an instance that first appears
+   mid-stream goes back to its `.sdm` placement on the way back once playback passes
+   its first sample.
 4. **Stop / Rest Pose:** restore every bound channel to its `neutral`; drop any held
    fields. Cleanup is scoped to exactly the channels the player drove.
 5. **Scrubbing:** evaluate at arbitrary time: binary-search samples by `t`, interpolate
@@ -140,11 +159,85 @@ configuration; `loop:"cycle"` wraps (§5).
    consumer is `emergent-matter-sdm-view`, whose viewport and grid-path modules check
    an is-animation-playing flag), or the refine ladder misbehaves.
 
+## 5a. Assembly motion: poses
+
+A stream may move the instances of an assembly instead of (or as well as) driving
+channels: a mechanism whose parts move rigidly, precomputed by the CEM that knows its
+kinematics (a crank angle swept through its range, every link placed at each step).
+`part` names the assembly, `sdm` points at its `.sdm`, `channels` may be empty or
+absent.
+
+Header key, optional:
+
+| Key | Type | Semantics |
+|---|---|---|
+| `poses` | list of str | MUST be a list if present (a bare string is malformed). The instance paths the samples move, so a player can list them before reading samples. Informational; a sample's `poses` keys are authoritative. |
+
+Sample key:
+
+| Key | Type | Semantics |
+|---|---|---|
+| `poses` | obj | `{instance_path: [x, y, z, qw, qx, qy, qz]}`. `instance_path` is instance ids from this assembly down, joined by `/` (`"mechanism/crank_driven_thumb"`). The value is that instance's transform relative to its parent assembly, in the same convention as `Instance.transform` in the `.sdm` (sdm-core, `software_defined_matter.assembly.model.Instance`, a `Frame`): position in mm, then a unit quaternion in scalar-first (w, x, y, z) order, the ordering sdm-core's `ports.py` fixes. **Sparse:** an instance holds its last pose; before its first appearance it sits where its `.sdm` puts it. |
+
+A pose is validated on read and on write: exactly 7 finite numbers, and a quaternion
+whose norm is within 1e-3 of 1. Anything else raises `ValueError`; a pose is never
+silently dropped (a dropped pose in a sparse stream would read as "hold", a frozen
+link with no error), and NaN or infinity is never written (they are not JSON).
+Readers renormalise the quaternion, because rounding to 6 decimals leaves its norm
+off by about 3e-7.
+
+Playback, beyond §5: positions interpolate linearly; orientations by spherical linear
+interpolation on the **shortest arc**: before interpolating two quaternions, negate
+one if their dot product is below 0 (`q` and `-q` are the same rotation, and without
+this a `q` / `-q` pair between samples spins a full turn). Producers wanting smoother
+motion emit denser samples, as for channels. Before an instance's first appearance it
+sits at its `.sdm` placement and **snaps** to its first sample's pose when that sample
+is reached: there is no interpolation from the rest placement to the first sample.
+Stop / Rest Pose puts every moved instance
+back where its `.sdm` puts it. Instances not named in any sample never move. A
+player that does not know `poses` ignores the key (§6) and shows the assembly still.
+
+Location, two conventions, both the same stream format:
+
+- `<assembly>.motions/`: next to the assembly, in a folder named after it:
+  `hand.sdm` → `hand.motions/grip.traj.jsonl`, with `"sdm": "../hand.sdm"`. A viewer
+  offers every stream in that folder as a motion of that assembly. The CEM writes
+  them when it writes the assembly, so `sdm_sha256` matches.
+- `<name>.configuration/<input>.traj.jsonl`: RobCAD's input sweeps, named by the
+  `sweep` key of an input in the assembly's `metadata.configuration`
+  (`hand.configuration/grip.traj.jsonl`). Each sample's `q` carries the input's value
+  and `poses` each moving instance's transform. It is a sweep to be combined with
+  other inputs by RobCAD, not a motion to play on its own, so a `.motions/` listing
+  does not include it.
+
+A machine-checkable form of the format is `schema/sdm-traj-v1.json` (JSON Schema,
+draft 2020-12), and golden files under `tests/data/` (`hand.motions/grip.traj.jsonl`
+exercises sparse poses, a mid-stream first appearance, a `q` / `-q` pair and a
+ping-pong with more than two samples). Every reader should read the goldens.
+
+## 5b. Reference evaluator and expected frames
+
+`sdm_physics.trajectory_playback` implements §5 and §5a as code: `Playback(header,
+samples).at(elapsed_s)` returns the channel values, held field references and
+instance poses a player should show, and `stream_time` is the loop rule on its own.
+It is a reference, not a player.
+
+Each golden stream under `tests/data/` has a file of expected frames under
+`tests/data/expected/`, worked by hand from this spec. A frame gives `elapsed_s`
+(seconds since playback started), `t` (the stream time that maps to), and the
+expected `q`, `fields` and `poses`, with `null` for an instance at its `.sdm`
+placement. Compare quaternions as rotations (`q` and `-q` are equal) and numbers to
+the file's `tolerance`. `finger.traj.jsonl` covers channels and fields: a late first
+appearance, a held channel between two samples that name it, an undeclared `q` key,
+a channel of unknown kind, a non-zero start time and `cycle`. Every player should
+reproduce these frames.
+
 ## 6. Versioning & forward compatibility
 
 - `version` is an integer and gates **breaking** changes only (meaning changes to
   existing keys). Readers ignore unknown header keys, sample keys, channel keys,
-  field-ref keys, and unknown `kind` / `loop` values. New capabilities (velocities,
+  field-ref keys, and unknown `kind` values. An unknown `loop` value is treated as
+  `"once"`. New capabilities (velocities,
   scalar field kinds, pingpong loops, a socket fields-root, per-sample metrics) land as
   new keys/values without a version bump.
 - Reader rejection follows the io-layer convention:
@@ -238,8 +331,12 @@ hand-written trajectory consumed by the identical playback path.
   `write_trajectory(path, header, samples) -> Path`, `read_header(path)`, and
   `iter_samples(lines)` as a **generator over any open line-iterable**
   (streaming-first: never load the whole file; the identical reader wraps a socket
-  in v2). The consumer side keeps its own reader in `emergent-matter-sdm-view`,
-  under the same conventions.
+  in v2). The consumer sides keep their own readers (the engine, sdm-ui's player,
+  RobCAD, `emergent-matter-sdm-view`) under the same conventions.
+- The dataclasses and `check_pose` live in `src/sdm_physics/trajectory_types.py`; the
+  writer and reader re-export them from `sdm_physics.trajectory`.
+- The reference evaluator is `src/sdm_physics/trajectory_playback.py`, tested in
+  `tests/test_trajectory_playback.py` against the expected frames (§5b).
 - Tests in `tests/test_trajectory.py`: round-trip via `tmp_path`, `pytest.approx` on
   floats, `pytest.raises(ValueError, match="Unsupported")` for the version gate, a
   sparse-`q` hold case, and a headerless-stream rejection case. Plain Python, no bpy in

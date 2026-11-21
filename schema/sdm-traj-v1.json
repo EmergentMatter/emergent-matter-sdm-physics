@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/EmergentMatter/emergent-matter-sdm-physics/schema/sdm-traj-v1.json",
+  "title": "sdm-traj v1 record",
+  "description": "One line of a .traj.jsonl stream: a header, a sample or an end-of-stream record. Discrimination is by key presence (docs/trajectory-format.md section 1). Unknown keys are allowed everywhere (forward compatibility). Not expressed here: strictly increasing t, the quaternion unit-norm tolerance of 1e-3, and a first record that must be a header.",
+  "oneOf": [
+    {"$ref": "#/$defs/header"},
+    {"$ref": "#/$defs/sample"},
+    {"$ref": "#/$defs/eos"}
+  ],
+  "$defs": {
+    "header": {
+      "type": "object",
+      "required": ["format", "version", "part"],
+      "properties": {
+        "format": {"const": "sdm-traj"},
+        "version": {"const": 1},
+        "part": {"type": "string"},
+        "name": {"type": "string"},
+        "sdm": {"type": "string"},
+        "sdm_sha256": {"type": "string"},
+        "loop": {"type": "string", "description": "once | cycle | pingpong; an unknown value is treated as once"},
+        "rate_hz": {"type": "number"},
+        "duration_s": {"type": "number"},
+        "source": {"type": "object"},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/channel"}},
+        "poses": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "channel": {
+      "type": "object",
+      "required": ["name", "kind", "neutral"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"type": "string"},
+        "neutral": {"type": "number"},
+        "unit": {"type": "string"}
+      }
+    },
+    "pose": {
+      "type": "array",
+      "description": "x, y, z in mm, then a unit quaternion w, x, y, z",
+      "prefixItems": [
+        {"type": "number"}, {"type": "number"}, {"type": "number"},
+        {"type": "number"}, {"type": "number"}, {"type": "number"}, {"type": "number"}
+      ],
+      "minItems": 7,
+      "maxItems": 7
+    },
+    "sample": {
+      "type": "object",
+      "required": ["t"],
+      "properties": {
+        "t": {"type": "number"},
+        "q": {"type": "object", "additionalProperties": {"type": "number"}},
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "kind"],
+            "properties": {"path": {"type": "string"}, "kind": {"type": "string"}}
+          }
+        },
+        "poses": {"type": "object", "additionalProperties": {"$ref": "#/$defs/pose"}}
+      }
+    },
+    "eos": {
+      "type": "object",
+      "required": ["eos"],
+      "properties": {"eos": {"const": true}}
+    }
+  }
+}

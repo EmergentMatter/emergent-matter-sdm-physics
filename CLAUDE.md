@@ -44,6 +44,9 @@ src/sdm_physics/
 │                     manager, eos-on-close), write_trajectory() one-shot,
 │                     read_header(), iter_samples() (generator over any open
 │                     line-iterable), read_trajectory().
+├── trajectory_playback.py -- reference evaluator for the playback rules (spec §5,
+│                     §5a). Checked against the hand-worked expected frames in
+│                     tests/data/expected/; other players check against them too.
 ├── solvers/
 │   ├── bcm.py      -- Beam Constraint Model primitive: clamped-clamped
 │   │                 Euler-Bernoulli beam with Awtar's third-order axial

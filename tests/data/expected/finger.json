@@ -1,0 +1,67 @@
+{
+  "description": "Expected frames for finger.traj.jsonl, worked by hand from docs/trajectory-format.md section 5. The stream starts at t = 10 and loops with cycle. finger__spread first appears at t = 12, so it holds its neutral 0.1 until t = 11 and ramps from there. finger__curl is absent at t = 12, so it holds 1.0 from t = 11 to t = 12. finger__force has an unknown kind and solver_residual is undeclared, so neither appears.",
+  "stream": "../finger.traj.jsonl",
+  "tolerance": 1e-05,
+  "frames": [
+    {
+      "elapsed_s": 0.0,
+      "t": 10.0,
+      "q": {
+        "finger__curl": 0.0,
+        "finger__spread": 0.1
+      },
+      "fields": {
+        "displacement": "fields/finger_u_000.npy"
+      },
+      "poses": {}
+    },
+    {
+      "elapsed_s": 0.5,
+      "t": 10.5,
+      "q": {
+        "finger__curl": 0.5,
+        "finger__spread": 0.1
+      },
+      "fields": {
+        "displacement": "fields/finger_u_000.npy"
+      },
+      "poses": {}
+    },
+    {
+      "elapsed_s": 1.5,
+      "t": 11.5,
+      "q": {
+        "finger__curl": 1.0,
+        "finger__spread": 0.3
+      },
+      "fields": {
+        "displacement": "fields/finger_u_000.npy"
+      },
+      "poses": {}
+    },
+    {
+      "elapsed_s": 2.5,
+      "t": 12.5,
+      "q": {
+        "finger__curl": 0.5,
+        "finger__spread": 0.3
+      },
+      "fields": {
+        "displacement": "fields/finger_u_002.npy"
+      },
+      "poses": {}
+    },
+    {
+      "elapsed_s": 3.5,
+      "t": 10.5,
+      "q": {
+        "finger__curl": 0.5,
+        "finger__spread": 0.1
+      },
+      "fields": {
+        "displacement": "fields/finger_u_000.npy"
+      },
+      "poses": {}
+    }
+  ]
+}
