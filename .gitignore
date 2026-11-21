@@ -20,3 +20,7 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Local graphify tool artifacts (never part of the repo)
+.graphify/
+.graphifyy/
