@@ -4,6 +4,8 @@ Plain Python, stdlib + pytest only (no bpy, no jax in the collection path).
 """
 
 import json
+import math
+from pathlib import Path
 
 import pytest
 
@@ -295,3 +297,186 @@ def test_empty_stream_rejected(tmp_path):
     path.write_text("")
     with pytest.raises(ValueError, match="header"):
         read_trajectory(path)
+
+
+_GOLDEN = Path(__file__).parent / "data" / "hand.motions" / "grip.traj.jsonl"
+_SCHEMA = Path(__file__).parents[1] / "schema" / "sdm-traj-v1.json"
+_POSE = (0.0, 0.0, 10.0, 1.0, 0.0, 0.0, 0.0)
+
+
+def _write_lines(tmp_path, *objs):
+    path = tmp_path / "x.traj.jsonl"
+    path.write_text("".join(json.dumps(o) + "\n" for o in objs))
+    return path
+
+
+def _hdr(**extra):
+    return {"format": "sdm-traj", "version": 1, "part": "hand", **extra}
+
+
+def test_assembly_poses_round_trip(tmp_path):
+    header = TrajectoryHeader(
+        s_part="hand",
+        s_sdm="../hand.sdm",
+        s_loop="pingpong",
+        poses=("mechanism/crank_driven_thumb",),
+    )
+    samples = [
+        Sample(d_t=0.0, poses={"mechanism/crank_driven_thumb": _POSE}),
+        Sample(
+            d_t=1.0,
+            poses={
+                "mechanism/crank_driven_thumb": (0.0, 0.0, 10.0, 0.7071068, 0.7071068, 0.0, 0.0)
+            },
+        ),
+    ]
+    path = write_trajectory(tmp_path / "grip.traj.jsonl", header, samples)
+    back_header, back = read_trajectory(path)
+    assert back_header.s_loop == "pingpong"
+    assert back_header.poses == ("mechanism/crank_driven_thumb",)
+    assert back[1].poses["mechanism/crank_driven_thumb"] == pytest.approx(
+        (0.0, 0.0, 10.0, 0.707107, 0.707107, 0.0, 0.0)
+    )
+
+
+def test_header_without_channels_reads(tmp_path):
+    path = _write_lines(tmp_path, _hdr(loop="pingpong"), {"t": 0.0, "poses": {"a": list(_POSE)}})
+    header, samples = read_trajectory(path)
+    assert header.channels == ()
+    assert len(samples) == 1
+
+
+def test_header_without_part_raises_value_error(tmp_path):
+    path = _write_lines(tmp_path, {"format": "sdm-traj", "version": 1})
+    with pytest.raises(ValueError, match="part"):
+        read_header(path)
+
+
+def test_header_channels_not_a_list_rejected(tmp_path):
+    path = _write_lines(tmp_path, _hdr(channels="ab"))
+    with pytest.raises(ValueError, match="channels"):
+        read_header(path)
+
+
+@pytest.mark.parametrize("bad", ["ab", {"a": 1}, 3])
+def test_header_poses_must_be_a_list(tmp_path, bad):
+    path = _write_lines(tmp_path, _hdr(poses=bad))
+    with pytest.raises(ValueError, match="poses"):
+        read_header(path)
+
+
+@pytest.mark.parametrize(
+    "pose",
+    [
+        [1, 2, 3],
+        [0, 0, 0, "x", 0, 0, 0],
+        [0, 0, 0, None, 0, 0, 0],
+        [0, 0, 0, True, 0, 0, 0],
+        [0, 0, 0, math.nan, 0, 0, 0],
+        [math.inf, 0, 0, 1, 0, 0, 0],
+        [0, 0, 0, 0.9, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        "abcdefg",
+        None,
+    ],
+)
+def test_malformed_pose_raises_on_read(tmp_path, pose):
+    path = _write_lines(tmp_path, _hdr(), {"t": 0.0, "poses": {"a": pose}})
+    # json.dumps writes NaN/Infinity, which json.loads accepts: the pose check must catch it.
+    with pytest.raises(ValueError, match="pose"):
+        read_trajectory(path)
+    with pytest.raises(ValueError, match="pose"):
+        list(iter_samples(path.read_text().splitlines()[1:]))
+
+
+@pytest.mark.parametrize(
+    "pose",
+    [(1, 2, 3), (0, 0, 0, math.nan, 0, 0, 0), (0, 0, 0, 0.9, 0, 0, 0), (0, 0, 0, "x", 0, 0, 0)],
+)
+def test_malformed_pose_raises_on_write(tmp_path, pose):
+    header = TrajectoryHeader(s_part="hand")
+    with pytest.raises(ValueError, match="pose"):
+        write_trajectory(tmp_path / "bad.traj.jsonl", header, [Sample(d_t=0.0, poses={"a": pose})])
+
+
+def test_non_finite_value_is_never_written(tmp_path):
+    header = TrajectoryHeader(s_part="hand")
+    with pytest.raises(ValueError):
+        write_trajectory(tmp_path / "nan.traj.jsonl", header, [Sample(d_t=0.0, q={"a": math.nan})])
+    assert "NaN" not in (tmp_path / "nan.traj.jsonl").read_text()
+
+
+def test_quaternion_renormalised_on_read():
+    s = Sample.from_obj({"t": 0.0, "poses": {"a": [0, 0, 0, 1.0004, 0, 0, 0]}})
+    assert s.poses["a"] == pytest.approx((0, 0, 0, 1.0, 0, 0, 0), abs=1e-12)
+
+
+@pytest.mark.parametrize("t1", [0.0, -1.0, math.nan])
+def test_non_increasing_t_rejected(tmp_path, t1):
+    path = _write_lines(tmp_path, _hdr(), {"t": 0.0}, {"t": t1})
+    with pytest.raises(ValueError, match=r"\bt\b"):
+        read_trajectory(path)
+    with pytest.raises(ValueError, match=r"\bt\b"):
+        list(iter_samples(path.read_text().splitlines()))
+
+
+def test_t_order_restarts_after_reheader(tmp_path):
+    path = _write_lines(tmp_path, _hdr(), {"t": 5.0}, _hdr(), {"t": 0.0})
+    _, samples = read_trajectory(path)
+    assert [s.d_t for s in samples] == [0.0]
+    assert [s.d_t for s in iter_samples(path.read_text().splitlines())] == [5.0, 0.0]
+
+
+def test_golden_motion_reads():
+    header, samples = read_trajectory(_GOLDEN)
+    assert header.s_loop == "pingpong"
+    assert header.channels == ()
+    assert len(samples) == 5
+    # sparse: only the thumb at t=0, only the index at t=0.75
+    assert set(samples[0].poses) == {"mechanism/thumb"}
+    assert set(samples[3].poses) == {"mechanism/index"}
+    # the index first appears mid-stream
+    assert all("mechanism/index" not in s.poses for s in samples[:2])
+    assert "mechanism/index" in samples[2].poses
+    # a q / -q pair: identity then (-w, -x): same rotation as 90 deg about x, opposite sign
+    assert samples[0].poses["mechanism/thumb"][3] == pytest.approx(1.0)
+    assert samples[1].poses["mechanism/thumb"][3] < 0
+
+
+def test_golden_motion_round_trips_through_writer(tmp_path):
+    header, samples = read_trajectory(_GOLDEN)
+    path = write_trajectory(tmp_path / "again.traj.jsonl", header, samples)
+    header2, samples2 = read_trajectory(path)
+    assert header2 == header
+    assert [s.d_t for s in samples2] == [s.d_t for s in samples]
+    for a, b in zip(samples, samples2, strict=True):
+        assert set(a.poses) == set(b.poses)
+        for k in a.poses:
+            assert b.poses[k] == pytest.approx(a.poses[k], abs=1e-6)
+
+
+def _schema_def(schema, obj):
+    """Pick the record def by key presence, as spec section 1 does."""
+    key = "header" if "format" in obj else "sample" if "t" in obj else "eos"
+    return schema["$defs"][key]
+
+
+def test_schema_is_valid_json_and_goldens_satisfy_its_required_keys():
+    schema = json.loads(_SCHEMA.read_text())
+    assert schema["$defs"]["header"]["properties"]["format"] == {"const": "sdm-traj"}
+    assert schema["$defs"]["header"]["required"] == ["format", "version", "part"]
+    for line in _GOLDEN.read_text().splitlines():
+        obj = json.loads(line)
+        assert set(_schema_def(schema, obj)["required"]) <= set(obj)
+        for pose in obj.get("poses", {}).values() if "t" in obj else ():
+            assert len(pose) == 7
+
+
+def test_goldens_validate_against_schema_when_jsonschema_is_installed():
+    # jsonschema is not a dev dependency (adding it would change uv.lock and CI);
+    # this runs where it happens to be installed.
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(_SCHEMA.read_text())
+    jsonschema.Draft202012Validator.check_schema(schema)
+    for line in _GOLDEN.read_text().splitlines():
+        jsonschema.validate(json.loads(line), schema)
