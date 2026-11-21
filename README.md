@@ -128,7 +128,7 @@ conventions.
 
 | Page | What it covers |
 |---|---|
-| [`docs/trajectory-format.md`](docs/trajectory-format.md) | The `sdm-traj` v1 spec (normative): the cross-repo contract between this layer's producers and sdm-view's playback path |
+| [`docs/trajectory-format.md`](docs/trajectory-format.md) | The `sdm-traj` v1 spec (normative): the cross-repo contract between this layer's producers and the platform's playback, including assembly motion ([§5a](docs/trajectory-format.md#5a-assembly-motion-poses)) |
 | [STYLE.md](STYLE.md) / [CONTRIBUTING.md](CONTRIBUTING.md) | House style and how a change ships |
 
 Those pages document this library. For the wider SDM ecosystem and the

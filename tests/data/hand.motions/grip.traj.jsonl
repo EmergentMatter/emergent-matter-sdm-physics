@@ -1,0 +1,7 @@
+{"format":"sdm-traj","version":1,"part":"hand","name":"grip","sdm":"../hand.sdm","loop":"pingpong","poses":["mechanism/thumb","mechanism/index"]}
+{"t":0.0,"poses":{"mechanism/thumb":[0.0,0.0,10.0,1.0,0.0,0.0,0.0]}}
+{"t":0.25,"poses":{"mechanism/thumb":[1.0,0.0,10.0,-0.707107,-0.707107,0.0,0.0]}}
+{"t":0.5,"poses":{"mechanism/thumb":[2.0,0.0,10.0,0.0,1.0,0.0,0.0],"mechanism/index":[5.0,0.0,0.0,1.0,0.0,0.0,0.0]}}
+{"t":0.75,"poses":{"mechanism/index":[5.0,0.0,2.0,0.92388,0.0,0.382683,0.0]}}
+{"t":1.0,"poses":{"mechanism/thumb":[3.0,0.0,10.0,-0.707107,0.707107,0.0,0.0],"mechanism/index":[5.0,0.0,4.0,0.707107,0.0,0.707107,0.0]}}
+{"eos":true}
