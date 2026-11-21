@@ -18,11 +18,13 @@ Naming follows the org convention: ``d_`` float, ``n_`` int, ``b_`` bool,
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import IO, Any
 
 from sdm_physics.trajectory_types import (
+    _N_FLOAT_DECIMALS,
     TRAJ_EXTENSION,
     TRAJ_FORMAT,
     TRAJ_VERSION,
@@ -92,6 +94,8 @@ class TrajectoryWriter:
         self._f: IO[str] | None = self.path.open("w", encoding="utf-8", newline="\n")
         self.b_eos_written = False
         self.n_samples_written = 0
+        # t of the last sample as written (after rounding), None after a header.
+        self._d_last_t: float | None = None
         self.write_header(header)
 
     # -- record writers --------------------------------------------------
@@ -108,9 +112,26 @@ class TrajectoryWriter:
         which replaces the previous one and resets consumer hold state."""
         self._write_line(header.to_obj())
         self.header = header
+        self._d_last_t = None  # a re-header restarts t order, as on read
 
     def write_sample(self, sample: Sample) -> None:
-        self._write_line(sample.to_obj())
+        """Write one sample. Raises ValueError if its ``t`` is not finite or,
+        once rounded for the wire, does not exceed the previous sample's
+        (spec §4). The check runs on the rounded value because that is what a
+        reader sees: two samples closer than the rounding step would otherwise
+        write a stream the reader rejects."""
+        obj = sample.to_obj()
+        d_t = obj["t"]
+        if not math.isfinite(d_t):
+            raise ValueError(f"Sample t={sample.d_t!r} is not finite")
+        if self._d_last_t is not None and d_t <= self._d_last_t:
+            raise ValueError(
+                f"Sample t={sample.d_t!r} (written as {d_t!r}) does not follow "
+                f"t={self._d_last_t!r}: t must strictly increase after rounding to "
+                f"{_N_FLOAT_DECIMALS} decimals"
+            )
+        self._write_line(obj)
+        self._d_last_t = d_t
         self.n_samples_written += 1
 
     def write_eos(self, **info: Any) -> None:

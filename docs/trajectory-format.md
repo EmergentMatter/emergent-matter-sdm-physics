@@ -84,7 +84,7 @@ check runs once, against the header, before a single sample is consumed.
 
 | Key | Required | Type | Semantics |
 |---|---|---|---|
-| `t` | yes | float | Time in **seconds**, finite and strictly increasing within a stream (per header: a re-header restarts the order). Readers raise `ValueError` on a sample whose `t` does not exceed the previous one. Need not start at 0 (solver warm starts, live tails); players treat the first sample's `t` as the playback origin. Compiled authored streams SHOULD start at `t = 0.0`. |
+| `t` | yes | float | Time in **seconds**, finite and strictly increasing within a stream (per header: a re-header restarts the order). Readers raise `ValueError` on a sample whose `t` does not exceed the previous one. Writers apply the same check to `t` as written, after rounding, so a writer never produces a stream its reader rejects. Need not start at 0 (solver warm starts, live tails); players treat the first sample's `t` as the playback origin. Compiled authored streams SHOULD start at `t = 0.0`. |
 | `q` | no | obj | `{channel_name: float}`: absolute values in the channel's unit. **Sparse:** a sample may carry any subset of declared channels; omitted channels **hold** their last value (or `neutral` before their first appearance). Keys not declared in `channels` are ignored (a free diagnostic channel for producers). |
 | `fields` | no | list | Field references (§4.1). Each **holds** until superseded by a later reference of the same `kind`. Field cadence is fully independent of sample cadence. |
 
@@ -121,6 +121,12 @@ configuration; `loop:"cycle"` wraps and `loop:"pingpong"` keeps bouncing (§5).
    held-value timeline (after sparse-`q` hold is applied). There is deliberately no
    interpolation/easing schema: producers wanting smoother motion emit denser samples;
    easing lives in the producer, never in the format or the player.
+   The held-value timeline gives every channel a value at every sample, so a channel
+   interpolates between its held values at the two samples around `t`, not between
+   the samples that name it. A channel named at `t = 0` and `t = 2` but absent at
+   `t = 1` holds its `t = 0` value until `t = 1`, then ramps. A channel whose first
+   sample is at `t = 2` sits at `neutral` until the sample before it, then ramps from
+   `neutral`. Poses differ here and snap instead (§5a).
 2. **Hold:** last value per channel, last field ref per kind. Before a channel's first
    sample it sits at `neutral`. After the last sample (`loop:"once"`), hold the last
    values. A new header resets all hold state.
@@ -131,6 +137,14 @@ configuration; `loop:"cycle"` wraps and `loop:"pingpong"` keeps bouncing (§5).
    looping, like `cycle`. `loop:"cycle"` wraps playback time modulo the period
    `(t_last − t_first)`, the trajectory equivalent of a CYCLES f-curve modifier.
    `duration_s` is never the authoritative period.
+   With `e` the seconds since playback started and `span = t_last − t_first`, the
+   stream time evaluated is `t_first + min(e, span)` for `once`,
+   `t_first + (e mod span)` for `cycle`, and for `pingpong`
+   `t_first + u` where `u = e mod 2·span`, mirrored to `2·span − u` when it exceeds
+   `span`. The way back evaluates the same stream at the mirrored time, so holds and
+   snaps follow stream order, not playback order: an instance that first appears
+   mid-stream goes back to its `.sdm` placement on the way back once playback passes
+   its first sample.
 4. **Stop / Rest Pose:** restore every bound channel to its `neutral`; drop any held
    fields. Cleanup is scoped to exactly the channels the player drove.
 5. **Scrubbing:** evaluate at arbitrary time: binary-search samples by `t`, interpolate
@@ -200,6 +214,23 @@ A machine-checkable form of the format is `schema/sdm-traj-v1.json` (JSON Schema
 draft 2020-12), and golden files under `tests/data/` (`hand.motions/grip.traj.jsonl`
 exercises sparse poses, a mid-stream first appearance, a `q` / `-q` pair and a
 ping-pong with more than two samples). Every reader should read the goldens.
+
+## 5b. Reference evaluator and expected frames
+
+`sdm_physics.trajectory_playback` implements §5 and §5a as code: `Playback(header,
+samples).at(elapsed_s)` returns the channel values, held field references and
+instance poses a player should show, and `stream_time` is the loop rule on its own.
+It is a reference, not a player.
+
+Each golden stream under `tests/data/` has a file of expected frames under
+`tests/data/expected/`, worked by hand from this spec. A frame gives `elapsed_s`
+(seconds since playback started), `t` (the stream time that maps to), and the
+expected `q`, `fields` and `poses`, with `null` for an instance at its `.sdm`
+placement. Compare quaternions as rotations (`q` and `-q` are equal) and numbers to
+the file's `tolerance`. `finger.traj.jsonl` covers channels and fields: a late first
+appearance, a held channel between two samples that name it, an undeclared `q` key,
+a channel of unknown kind, a non-zero start time and `cycle`. Every player should
+reproduce these frames.
 
 ## 6. Versioning & forward compatibility
 
@@ -304,6 +335,8 @@ hand-written trajectory consumed by the identical playback path.
   RobCAD, `emergent-matter-sdm-view`) under the same conventions.
 - The dataclasses and `check_pose` live in `src/sdm_physics/trajectory_types.py`; the
   writer and reader re-export them from `sdm_physics.trajectory`.
+- The reference evaluator is `src/sdm_physics/trajectory_playback.py`, tested in
+  `tests/test_trajectory_playback.py` against the expected frames (§5b).
 - Tests in `tests/test_trajectory.py`: round-trip via `tmp_path`, `pytest.approx` on
   floats, `pytest.raises(ValueError, match="Unsupported")` for the version gate, a
   sparse-`q` hold case, and a headerless-stream rejection case. Plain Python, no bpy in
